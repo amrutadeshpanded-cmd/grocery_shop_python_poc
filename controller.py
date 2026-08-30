@@ -548,7 +548,14 @@ def create_order():
     #Check if "user_id" exists in the session
     if "user_id" in session:
         #Get the total price of the order from the query parameters
-        total = request.args.get("total_price")
+        # Get checkout total
+        total = float(request.args.get("total_price"))
+
+        ###############
+        # # Release 1: Apply 5% discount for orders over $50
+        if total > 50:
+            discount = total * 0.05
+            total = round(total - discount, 2)
         #Create a new Order record with the user's ID and the total price
         new_order = Order(user_id=session["user_id"], order_total=total)
         db.session.add(new_order)
