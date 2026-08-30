@@ -1,0 +1,13 @@
+# Secrets
+.env
+
+# Python virtual environments
+poc-venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# AI generated local output
+output/
