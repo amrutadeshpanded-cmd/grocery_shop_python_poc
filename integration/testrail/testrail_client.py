@@ -59,6 +59,17 @@ class TestRailClient:
         response.raise_for_status()
         return response.json()
 
+    def get_run(self, run_id):
+        return self._get(
+            f"get_run/{run_id}"
+        )
+
+
+    def get_tests(self, run_id):
+        return self._get(
+            f"get_tests/{run_id}"
+        )
+
     def get_project(self):
         return self._get(
             f"get_project/{self.project_id}"
@@ -179,3 +190,21 @@ class TestRailClient:
                 return case
 
         return None
+
+    def create_run(self, name, case_ids, suite_id=None, description=None):
+        suite_id = suite_id or int(os.getenv("TESTRAIL_SUITE_ID"))
+
+        payload = {
+            "name": name,
+            "suite_id": suite_id,
+            "include_all": False,
+            "case_ids": case_ids
+        }
+
+        if description:
+            payload["description"] = description
+
+        return self._post(
+            f"add_run/{self.project_id}",
+            payload
+        )
