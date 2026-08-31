@@ -533,17 +533,36 @@ def build_run_description(
     master_case_count,
     excluded_cases
 ):
-    master_after = (
-        master_case_count
-        + len(created_new_cases)
-    )
-
     release_total = (
         len(selected_cases)
         + len(created_new_cases)
     )
 
+    review_ids = {
+        item.get("case_id")
+        for item in ai_result.get(
+            "needs_review",
+            []
+        )
+    }
+
+    existing_cases = [
+        case
+        for case in selected_cases
+        if case.get("case_id")
+        not in review_ids
+    ]
+
+    review_cases = [
+        case
+        for case in selected_cases
+        if case.get("case_id")
+        in review_ids
+    ]
+
     lines = []
+
+    divider = "=" * 50
 
     lines.append(
         "AI RISK-BASED REGRESSION PLAN"
@@ -557,8 +576,13 @@ def build_run_description(
         f"{ai_result.get('risk_level', 'Unknown')}"
     )
 
+    # CHANGE SUMMARY
     lines.append("")
-    lines.append("CHANGE")
+    lines.append(divider)
+    lines.append("CHANGE SUMMARY")
+    lines.append(divider)
+    lines.append("")
+
     lines.append(
         ai_result.get(
             "release_summary",
@@ -566,77 +590,128 @@ def build_run_description(
         )
     )
 
+    # TEST FOCUS
     lines.append("")
+    lines.append(divider)
     lines.append("TEST FOCUS")
+    lines.append(divider)
+    lines.append("")
 
-    for item in ai_result.get(
+    impacted_areas = ai_result.get(
         "impacted_areas",
         []
-    ):
+    )
+
+    if impacted_areas:
+        for item in impacted_areas:
+            lines.append(
+                f"- {item.get('area', 'Unknown')}"
+            )
+    else:
         lines.append(
-            f"- {item.get('area', 'Unknown')}"
+            "- No specific impacted areas identified"
         )
 
+    # COVERAGE SUMMARY
     lines.append("")
-    lines.append("COVERAGE")
+    lines.append(divider)
+    lines.append("COVERAGE SUMMARY")
+    lines.append(divider)
     lines.append("")
-    lines.append("SELECTED TESTS")
 
-    review_ids = {
-        item.get("case_id")
-        for item in ai_result.get(
-            "needs_review",
-            []
-        )
-    }
-
-    for case in selected_cases:
-        case_id = case.get("case_id")
-        title = case.get("title", "")
-
-        suffix = (
-            " - TBD"
-            if case_id in review_ids
-            else ""
-        )
-
-        lines.append(
-            f"- C{case_id} - {title}{suffix}"
-        )
-
-    for case in created_new_cases:
-        lines.append(
-            f"- C{case.get('case_id')} - "
-            f"{case.get('title', '')} - NEW"
-        )
     lines.append(
-        f"Master before: {master_case_count}"
+        f"Reference cases:       "
+        f"{master_case_count}"
     )
     lines.append(
-        f"New cases added: "
-        f"{len(created_new_cases)}"
-    )
-    lines.append(
-        f"Master after: {master_after}"
-    )
-    lines.append("")
-    lines.append(
-        f"Existing selected: "
+        f"Existing selected:     "
         f"{len(selected_cases)}"
     )
     lines.append(
-        f"New selected: "
+        f"New cases added:       "
         f"{len(created_new_cases)}"
     )
     lines.append(
-        f"Release run total: "
+        f"Release run total:     "
         f"{release_total}"
     )
     lines.append(
-        f"Excluded: "
+        f"Excluded:              "
         f"{len(excluded_cases)}"
     )
 
+    # SELECTED TESTS
+    lines.append("")
+    lines.append(divider)
+    lines.append("SELECTED TESTS")
+    lines.append(divider)
+
+    # EXISTING
+    lines.append("")
+    lines.append("EXISTING")
+
+    if existing_cases:
+        for case in sorted(
+            existing_cases,
+            key=lambda x: x.get(
+                "case_id",
+                0
+            )
+        ):
+            lines.append(
+                f"- C{case.get('case_id')} - "
+                f"{case.get('title', '')}"
+            )
+    else:
+        lines.append(
+            "- None"
+        )
+
+    # TBD
+    lines.append("")
+    lines.append(
+        "TBD - REVIEW / UPDATE"
+    )
+
+    if review_cases:
+        for case in sorted(
+            review_cases,
+            key=lambda x: x.get(
+                "case_id",
+                0
+            )
+        ):
+            lines.append(
+                f"- C{case.get('case_id')} - "
+                f"{case.get('title', '')}"
+            )
+    else:
+        lines.append(
+            "- None"
+        )
+
+    # NEW
+    lines.append("")
+    lines.append("NEW")
+
+    if created_new_cases:
+        for case in sorted(
+            created_new_cases,
+            key=lambda x: x.get(
+                "case_id",
+                0
+            )
+        ):
+            lines.append(
+                f"- C{case.get('case_id')} - "
+                f"{case.get('title', '')}"
+            )
+    else:
+        lines.append(
+            "- None"
+        )
+
+    # NEW COVERAGE
     coverage_gaps = ai_result.get(
         "coverage_gaps",
         []
@@ -644,42 +719,16 @@ def build_run_description(
 
     if coverage_gaps:
         lines.append("")
-        lines.append("NEW COVERAGE ADDED")
+        lines.append(divider)
+        lines.append("NEW COVERAGE")
+        lines.append(divider)
+        lines.append("")
 
         for gap in coverage_gaps:
             lines.append(
                 f"- {gap.get('area', 'Unknown')}"
             )
 
-    lines.append("")
-    lines.append("SELECTED TESTS")
-
-    review_ids = {
-        item.get("case_id")
-        for item in ai_result.get(
-            "needs_review",
-            []
-        )
-    }
-
-    for case in selected_cases:
-        case_id = case.get("case_id")
-        title = case.get("title", "")
-
-        if case_id in review_ids:
-            suffix = " - TBD"
-        else:
-            suffix = ""
-
-        lines.append(
-            f"- C{case_id} - {title}{suffix}"
-        )
-
-    for case in created_new_cases:
-        lines.append(
-            f"- C{case.get('case_id')} - "
-            f"{case.get('title', '')} - NEW"
-        )
     return "\n".join(lines)
 
 def create_dynamic_run(
@@ -699,7 +748,9 @@ def create_dynamic_run(
             "Dynamic test run was not created."
         )
 
-    run_name = f"Dynamic Regression - {target_ref}"
+    run_name = (
+        f"Dynamic Regression - {target_ref}"
+    )
 
     return testrail.create_run(
         name=run_name,
