@@ -553,8 +553,9 @@ def create_order():
 
         ###############
         # # Release 1: Apply 5% discount for orders over $50
-        if total > 50:
-            # # Release 2: Apply 10% discount for orders over $50
+        # # Release 2: If total is greater than or equal to 100
+        if total >= 100:
+            # # Release 2: Apply 10% discount for orders of $100 or more
             discount = total * 0.10
             total = round(total - discount, 2)
         #Create a new Order record with the user's ID and the total price
