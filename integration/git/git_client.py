@@ -179,11 +179,6 @@ class GitClient:
             "diff": self.get_diff(
                 base_ref,
                 target_ref
-            ),
-            "changed_file_context":
-                self.get_changed_file_context(
-                    base_ref,
-                    target_ref
-                )
+            )
         }
         

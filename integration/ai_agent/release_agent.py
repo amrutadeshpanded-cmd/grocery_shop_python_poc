@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import csv
 from datetime import datetime
 from pathlib import Path
 
@@ -44,6 +45,168 @@ def extract_json(text):
 
     return json.loads(text)
 
+def save_proposed_cases_csv(
+    release_name,
+    proposed_cases
+):
+    repo_root = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            ".."
+        )
+    )
+
+    output_dir = os.path.join(
+        repo_root,
+        "processed_output",
+        release_name
+    )
+
+    os.makedirs(
+        output_dir,
+        exist_ok=True
+    )
+
+    file_path = os.path.join(
+        output_dir,
+        "05_proposed_new_test_cases.csv"
+    )
+
+    fieldnames = [
+        "Section",
+        "Title",
+        "Preconditions",
+        "Steps",
+        "Expected Result",
+        "Reason",
+        "Closest Existing Case ID",
+        "Why Not Reuse Existing",
+        "RMP Status"
+    ]
+
+    with open(
+        file_path,
+        "w",
+        newline="",
+        encoding="utf-8-sig"
+    ) as csv_file:
+
+        writer = csv.DictWriter(
+            csv_file,
+            fieldnames=fieldnames
+        )
+
+        writer.writeheader()
+
+        for case in proposed_cases:
+
+            preconditions = "\n".join(
+                case.get(
+                    "preconditions",
+                    []
+                )
+            )
+
+            steps = "\n".join(
+                f"{index}. {step}"
+                for index, step in enumerate(
+                    case.get("steps", []),
+                    start=1
+                )
+            )
+
+            writer.writerow({
+                "Section": case.get(
+                    "section",
+                    ""
+                ),
+                "Title": case.get(
+                    "title",
+                    ""
+                ),
+                "Preconditions": preconditions,
+                "Steps": steps,
+                "Expected Result": case.get(
+                    "expected_result",
+                    ""
+                ),
+                "Reason": case.get(
+                    "reason",
+                    ""
+                ),
+                "Closest Existing Case ID": (
+                    case.get(
+                        "closest_existing_case_id",
+                        ""
+                    )
+                    or ""
+                ),
+                "Why Not Reuse Existing": (
+                    case.get(
+                        "why_not_reuse_existing",
+                        ""
+                    )
+                ),
+                "RMP Status": (
+                    "Pending RMP Review"
+                )
+            })
+
+    print(
+        f"Saved proposed cases CSV: "
+        f"{file_path}"
+    )
+
+    return file_path
+
+def save_processed_output(
+    release_name,
+    filename,
+    data
+):
+    repo_root = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        ".."
+    )
+)
+
+    output_dir = os.path.join(
+    repo_root,
+    "processed_output",
+    release_name
+)
+    output_dir = os.path.join(
+        "processed_output",
+        release_name
+    )
+
+    os.makedirs(
+        output_dir,
+        exist_ok=True
+    )
+
+    file_path = os.path.join(
+        output_dir,
+        filename
+    )
+
+    with open(
+        file_path,
+        "w",
+        encoding="utf-8"
+    ) as file:
+        json.dump(
+            data,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
+    print(f"Saved processed output: {file_path}")
+    
+    return file_path
 
 def call_claude_with_retry(client, prompt, payload, retries=3):
     last_error = None
@@ -268,6 +431,18 @@ def validate_new_test_cases(
 
         normalized_title = title.lower()
 
+        closest_existing_case_id = case.get(
+            "closest_existing_case_id"
+        )
+
+        why_not_reuse_existing = str(
+            case.get(
+                "why_not_reuse_existing",
+                ""
+            )
+        ).strip()
+
+
         if normalized_title in seen_titles:
             print(
                 f"WARNING: Duplicate proposed test "
@@ -298,6 +473,16 @@ def validate_new_test_cases(
             )
             continue
 
+        if closest_existing_case_id is not None:
+            if not why_not_reuse_existing:
+                print(
+                    f"WARNING: Proposed new test '{title}' "
+                    f"has closest existing case "
+                    f"C{closest_existing_case_id} but no "
+                    f"reuse justification. Ignoring."
+                )
+                continue
+            
         seen_titles.add(normalized_title)
 
         preconditions = case.get(
@@ -323,6 +508,12 @@ def validate_new_test_cases(
                 "reason",
                 "New regression coverage"
             ),
+            "closest_existing_case_id": (
+                closest_existing_case_id
+            ),
+            "why_not_reuse_existing": (
+                why_not_reuse_existing
+            ),
             "preconditions": preconditions,
             "steps": steps,
             "expected_result": case.get(
@@ -344,169 +535,6 @@ def validate_new_test_cases(
     return ai_result
 
 
-def create_new_master_cases(
-    testrail,
-    new_test_cases,
-    master_cases
-):
-    if not new_test_cases:
-        return [], []
-
-    sections_raw = testrail.get_sections()
-
-    sections = normalize_collection(
-        sections_raw,
-        "sections"
-    )
-
-    section_by_name = {
-        section.get("name", "").strip().lower(): section
-        for section in sections
-    }
-
-    # Existing Master cases indexed by:
-    # (section name, case title)
-    existing_by_key = {
-        (
-            case.get("section", "").strip().lower(),
-            case.get("title", "").strip().lower()
-        ): case
-        for case in master_cases
-    }
-
-    created_cases = []
-    reused_cases = []
-
-    for case in new_test_cases:
-
-        section_name = case["section"].strip()
-        title = case["title"].strip()
-
-        key = (
-            section_name.lower(),
-            title.lower()
-        )
-
-        # -----------------------------
-        # DUPLICATE PROTECTION
-        # -----------------------------
-        existing = existing_by_key.get(key)
-
-        if existing:
-            print(
-                f"Existing Master case reused: "
-                f"C{existing['case_id']} - "
-                f"{existing['title']}"
-            )
-
-            reused_cases.append({
-                "case_id": existing["case_id"],
-                "title": existing["title"],
-                "section": existing["section"],
-                "reason": case.get(
-                    "reason",
-                    "Existing coverage reused"
-                ),
-                "impact_type": "Existing Coverage",
-                "is_new": False
-            })
-
-            continue
-
-        # -----------------------------
-        # FIND OR CREATE SECTION
-        # -----------------------------
-        section = section_by_name.get(
-            section_name.lower()
-        )
-
-        if section:
-            section_id = section["id"]
-
-        else:
-            print(
-                f"Creating new TestRail section: "
-                f"{section_name}"
-            )
-
-            created_section = (
-                testrail.create_section(
-                    name=section_name,
-                    suite_id=int(
-                        os.environ[
-                            "TESTRAIL_SUITE_ID"
-                        ]
-                    )
-                )
-            )
-
-            section_id = created_section["id"]
-
-            section_by_name[
-                section_name.lower()
-            ] = created_section
-
-        # -----------------------------
-        # FORMAT TESTRAIL FIELDS
-        # -----------------------------
-        preconditions_text = "\n".join(
-            case.get(
-                "preconditions",
-                []
-            )
-        )
-
-        steps_text = "\n".join(
-            f"{index}. {step}"
-            for index, step in enumerate(
-                case.get("steps", []),
-                start=1
-            )
-        )
-
-        expected_result = case.get(
-            "expected_result",
-            ""
-        )
-
-        print(
-            f"Creating new Master case: "
-            f"{title}"
-        )
-
-        # -----------------------------
-        # CREATE CASE
-        # -----------------------------
-        created_case = testrail.create_case(
-            section_id=section_id,
-            title=title,
-            custom_preconds=preconditions_text,
-            custom_steps=steps_text,
-            custom_expected=expected_result
-        )
-
-        new_case = {
-            "case_id": created_case["id"],
-            "title": created_case.get(
-                "title",
-                title
-            ),
-            "section": section_name,
-            "reason": case.get(
-                "reason",
-                "New regression coverage"
-            ),
-            "impact_type": "New Coverage",
-            "is_new": True
-        }
-
-        created_cases.append(new_case)
-
-        # Prevent another AI proposal in this same run
-        # from creating the same case again.
-        existing_by_key[key] = new_case
-
-    return created_cases, reused_cases
 
 def calculate_excluded_cases(
     master_cases,
@@ -529,72 +557,72 @@ def build_run_description(
     git_context,
     ai_result,
     selected_cases,
-    created_new_cases,
+    new_test_cases,
     master_case_count,
     excluded_cases
 ):
-    release_total = (
-        len(selected_cases)
-        + len(created_new_cases)
+    lines = []
+
+    review_items = ai_result.get(
+        "needs_review",
+        []
     )
 
-    review_ids = {
-        item.get("case_id")
-        for item in ai_result.get(
-            "needs_review",
-            []
-        )
+    review_by_id = {
+        item.get("case_id"): item
+        for item in review_items
     }
+
+    review_ids = set(
+        review_by_id.keys()
+    )
 
     existing_cases = [
         case
         for case in selected_cases
-        if case.get("case_id")
-        not in review_ids
+        if case.get("case_id") not in review_ids
     ]
 
     review_cases = [
         case
         for case in selected_cases
-        if case.get("case_id")
-        in review_ids
+        if case.get("case_id") in review_ids
     ]
 
-    lines = []
+    total_release_cases = len(
+        selected_cases
+    )
 
-    divider = "=" * 50
+    separator = "=" * 50
 
     lines.append(
         "AI RISK-BASED REGRESSION PLAN"
     )
-    lines.append("")
     lines.append(
         f"Release: {target_ref}"
     )
     lines.append(
         f"Risk: "
-        f"{ai_result.get('risk_level', 'Unknown')}"
+        f"{ai_result.get('risk_level', 'Unknown').upper()}"
     )
+    lines.append("")
 
-    # CHANGE SUMMARY
-    lines.append("")
-    lines.append(divider)
-    lines.append("CHANGE SUMMARY")
-    lines.append(divider)
-    lines.append("")
+    # --------------------------------------------------
+    # CHANGE
+    # --------------------------------------------------
+
+    lines.append(separator)
+    lines.append("CHANGE")
+    lines.append(separator)
+
+    release_summary = ai_result.get(
+        "release_summary",
+        "No release summary available."
+    )
 
     lines.append(
-        ai_result.get(
-            "release_summary",
-            "No summary available."
-        )
+        release_summary
     )
-
-    # TEST FOCUS
-    lines.append("")
-    lines.append(divider)
-    lines.append("TEST FOCUS")
-    lines.append(divider)
     lines.append("")
 
     impacted_areas = ai_result.get(
@@ -603,131 +631,221 @@ def build_run_description(
     )
 
     if impacted_areas:
-        for item in impacted_areas:
-            lines.append(
-                f"- {item.get('area', 'Unknown')}"
-            )
-    else:
-        lines.append(
-            "- No specific impacted areas identified"
-        )
+        area_names = []
 
-    # COVERAGE SUMMARY
-    lines.append("")
-    lines.append(divider)
-    lines.append("COVERAGE SUMMARY")
-    lines.append(divider)
-    lines.append("")
+        for item in impacted_areas:
+
+            if isinstance(item, dict):
+                area = item.get(
+                    "area",
+                    ""
+                )
+            else:
+                area = str(item)
+
+            if area:
+                area_names.append(
+                    area
+                )
+
+        if area_names:
+            lines.append(
+                "Impacted area: "
+                + " / ".join(
+                    area_names
+                )
+            )
+            lines.append("")
+
+    # --------------------------------------------------
+    # COVERAGE
+    # --------------------------------------------------
+
+    lines.append(separator)
+    lines.append("COVERAGE")
+    lines.append(separator)
 
     lines.append(
-        f"Reference cases:       "
+        f"Reference:              "
         f"{master_case_count}"
     )
+
     lines.append(
-        f"Existing selected:     "
-        f"{len(selected_cases)}"
+        f"Selected for execution: "
+        f"{len(selected_cases)} existing"
     )
+
     lines.append(
-        f"New cases added:       "
-        f"{len(created_new_cases)}"
+        f"Proposed new:            "
+        f"{len(new_test_cases)} "
+        f"(pending RMP review)"
     )
+
     lines.append(
-        f"Release run total:     "
-        f"{release_total}"
-    )
-    lines.append(
-        f"Excluded:              "
+        f"Excluded:                "
         f"{len(excluded_cases)}"
     )
 
-    # SELECTED TESTS
-    lines.append("")
-    lines.append(divider)
-    lines.append("SELECTED TESTS")
-    lines.append(divider)
+    lines.append(
+        f"TOTAL IN THIS RUN:       "
+        f"{total_release_cases}"
+    )
 
+    # --------------------------------------------------
     # EXISTING
+    # --------------------------------------------------
+
     lines.append("")
-    lines.append("EXISTING")
+    lines.append(separator)
+    lines.append("SELECTED COVERAGE")
+    lines.append(separator)
 
     if existing_cases:
-        for case in sorted(
-            existing_cases,
-            key=lambda x: x.get(
-                "case_id",
-                0
+
+        section_counts = {}
+
+        for case in existing_cases:
+
+            section = case.get(
+                "section",
+                "Other"
             )
+
+            if not section:
+                section = "Other"
+
+            section_counts[
+                section
+            ] = (
+                section_counts.get(
+                    section,
+                    0
+                )
+                + 1
+            )
+
+        for section, count in sorted(
+            section_counts.items()
         ):
             lines.append(
-                f"- C{case.get('case_id')} - "
-                f"{case.get('title', '')}"
+                f"{section}: "
+                f"{count} test"
+                f"{'s' if count != 1 else ''}"
             )
-    else:
-        lines.append(
-            "- None"
-        )
 
-    # TBD
+    else:
+        lines.append("None")
+
+    # --------------------------------------------------
+    # TBD / REVIEW
+    # --------------------------------------------------
+
     lines.append("")
+    lines.append(separator)
     lines.append(
         "TBD - REVIEW / UPDATE"
     )
+    lines.append(separator)
 
     if review_cases:
+
         for case in sorted(
             review_cases,
-            key=lambda x: x.get(
+            key=lambda item: item.get(
                 "case_id",
                 0
             )
         ):
-            lines.append(
-                f"- C{case.get('case_id')} - "
-                f"{case.get('title', '')}"
-            )
-    else:
-        lines.append(
-            "- None"
-        )
 
-    # NEW
+            case_id = case.get(
+                "case_id"
+            )
+
+            title = case.get(
+                "title",
+                ""
+            )
+
+            review = review_by_id.get(
+                case_id,
+                {}
+            )
+
+            reason = review.get(
+                "reason",
+                ""
+            )
+
+            if reason.startswith(
+                "TBD - update test case:"
+            ):
+                reason = reason.replace(
+                    "TBD - update test case:",
+                    ""
+                ).strip()
+
+            lines.append(
+                f"C{case_id}  {title}"
+            )
+
+            if reason:
+                lines.append(
+                    f"      Update: "
+                    f"{reason}"
+                )
+
+    else:
+        lines.append("None")
+
+    # --------------------------------------------------
+    # PROPOSED NEW COVERAGE
+    # --------------------------------------------------
+
     lines.append("")
-    lines.append("NEW")
+    lines.append(separator)
+    lines.append(
+        "PROPOSED NEW TESTS - "
+        "PENDING RMP REVIEW"
+    )
+    lines.append(separator)
 
-    if created_new_cases:
-        for case in sorted(
-            created_new_cases,
-            key=lambda x: x.get(
-                "case_id",
-                0
+    if new_test_cases:
+
+        for case in new_test_cases:
+
+            title = case.get(
+                "title",
+                ""
             )
-        ):
+
+            section = case.get(
+                "section",
+                ""
+            )
+
             lines.append(
-                f"- C{case.get('case_id')} - "
-                f"{case.get('title', '')}"
+                f"{title}"
             )
-    else:
+
+            if section:
+                lines.append(
+                    f"      Proposed section: "
+                    f"{section}"
+                )
+
+        lines.append("")
         lines.append(
-            "- None"
+            "These cases are not included "
+            "in this TestRail run."
         )
 
-    # NEW COVERAGE
-    coverage_gaps = ai_result.get(
-        "coverage_gaps",
-        []
-    )
+        lines.append(
+            "See proposed_new_test_cases.csv "
+            "for review/import."
+        )
 
-    if coverage_gaps:
-        lines.append("")
-        lines.append(divider)
-        lines.append("NEW COVERAGE")
-        lines.append(divider)
-        lines.append("")
-
-        for gap in coverage_gaps:
-            lines.append(
-                f"- {gap.get('area', 'Unknown')}"
-            )
+    else:
+        lines.append("None")
 
     return "\n".join(lines)
 
@@ -750,6 +868,18 @@ def create_dynamic_run(
 
     run_name = (
         f"Dynamic Regression - {target_ref}"
+    )
+
+    testrail_run_input = {
+    "name": run_name,
+    "description": description,
+    "case_ids": case_ids
+}
+
+    save_processed_output(
+        target_ref,
+        "05_testrail_run_input.json",
+        testrail_run_input
     )
 
     return testrail.create_run(
@@ -789,9 +919,9 @@ def build_change_log(
     ai_result,
     excluded_cases,
     test_run,
-    created_new_cases
+    new_test_cases
 ):
-    
+
     selected_cases = ai_result.get(
         "selected_cases",
         []
@@ -815,7 +945,8 @@ def build_change_log(
             "commit_count": git_context["commit_count"],
             "commits": git_context["commits"],
             "changed_files": git_context["changed_files"],
-            "diff_stat": git_context["diff_stat"]
+            "diff_stat": git_context["diff_stat"],
+            "diff": git_context["diff"]
         },
 
         "testrail_run": {
@@ -825,22 +956,22 @@ def build_change_log(
         },
 
         "master_suite": {
-            "before_count": len(master_cases),
-            "new_cases_created": len(created_new_cases),
-            "after_count": (
-                len(master_cases)
-                + len(created_new_cases)
-            )
+            "current_count": len(master_cases),
+            "new_cases_created": 0,
+            "rmp_updated_automatically": False
         },
 
         "selection_summary": {
             "existing_selected": len(selected_cases),
-            "new_selected": len(created_new_cases),
-            "total_release_cases": (
-                len(selected_cases)
-                + len(created_new_cases)
+            "proposed_new_pending_rmp_review": len(
+                new_test_cases
             ),
-            "excluded": len(excluded_cases)
+            "total_release_cases": len(
+                selected_cases
+            ),
+            "excluded": len(
+                excluded_cases
+            )
         },
 
         "impacted_areas": ai_result.get(
@@ -848,7 +979,15 @@ def build_change_log(
             []
         ),
 
-        "new_regression_cases": created_new_cases,
+        "proposed_new_test_cases": {
+            "status": "Pending RMP Review",
+            "included_in_testrail_run": False,
+            "count": len(new_test_cases),
+            "cases": new_test_cases,
+            "csv_file": (
+                "05_proposed_new_test_cases.csv"
+            )
+        },
 
         "selected_sections": group_cases_by_section(
             selected_cases
@@ -965,6 +1104,12 @@ def main():
             base_ref,
             target_ref
         )
+    )
+
+    save_processed_output(
+        target_ref,
+        "01_git_release_context.json",
+        git_context
     )
 
     print(
@@ -1085,6 +1230,11 @@ def main():
         "testrail_reference_cases": ai_reference_cases
     }
 
+    save_processed_output(
+        target_ref,
+        "02_claude_input.json",
+        payload
+    )
 
     # 4. Claude impact analysis
     prompt = PROMPT_FILE.read_text(
@@ -1108,6 +1258,12 @@ def main():
         payload
     )
 
+    save_processed_output(
+        target_ref,
+        "03_claude_output.json",
+        ai_result
+    )
+        
     # 5. Validate selected C IDs
     ai_result = validate_selected_cases(
         ai_result,
@@ -1119,6 +1275,20 @@ def main():
     master_cases
     )
 
+    save_proposed_cases_csv(
+    target_ref,
+    ai_result.get(
+        "new_test_cases",
+        []
+    )
+)
+    
+    save_processed_output(
+        target_ref,
+        "04_python_validated_result.json",
+        ai_result
+    )
+        
     selected_cases = ai_result.get(
         "selected_cases",
         []
@@ -1138,28 +1308,13 @@ def main():
     f"New regression cases proposed: "
     f"{len(new_test_cases)}"
     )
-
-    created_new_cases, reused_existing_cases = (
-    create_new_master_cases(
-        testrail,
-        new_test_cases,
-        master_cases
-    )
-)
-
-    print(
-        f"New master cases created: "
-        f"{len(created_new_cases)}"
-    )
+    # Proposed new cases are NOT created in TestRail.
+    # They remain in the CSV pending RMP review.
 
     release_cases_by_id = {
-    case["case_id"]: case
-    for case in (
-        selected_cases
-        + reused_existing_cases
-        + created_new_cases
-    )
-}
+        case["case_id"]: case
+        for case in selected_cases
+    }
 
     release_cases = list(
         release_cases_by_id.values()
@@ -1178,10 +1333,6 @@ def main():
         f"{len(excluded_cases)}"
     )
 
-    # 7. Create TestRail run
-    print(
-        "\nCreating dynamic TestRail run..."
-    )
     # 7. Build TestRail run description / changelog
     run_description = build_run_description(
         base_ref,
@@ -1189,7 +1340,7 @@ def main():
         git_context,
         ai_result,
         selected_cases,
-        created_new_cases,
+        new_test_cases,
         len(reference_cases),
         excluded_cases
     )
@@ -1221,7 +1372,7 @@ def main():
     ai_result,
     excluded_cases,
     test_run,
-    created_new_cases
+    new_test_cases
 )
 
     
@@ -1277,9 +1428,9 @@ def main():
     )
 
     print(
-        f"New cases added to RMP: "
-        f"{len(created_new_cases)}"
-    )
+    f"New cases pending RMP review: "
+    f"{len(new_test_cases)}"
+)
 
     print(
         f"Total release cases: "

@@ -292,6 +292,8 @@ def search():
                 Product.name.ilike(f"%{input_query}%"),
                 Product.brand.ilike(f"%{input_query}%"),
             )
+        ######Release 3: Search results are ordered from lowest price to highest price.
+        ).order_by(Product.price.asc()
         ).all()
 
         if product_results:

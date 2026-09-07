@@ -36,6 +36,42 @@ IMPORTANT RULES:
 - Do not create duplicate coverage.
 - Do not automatically create permanent tests for apparent defects, crashes, server errors, or unintended behavior.
 
+- A changed expected value does NOT automatically require a new regression test.
+- If an existing reference case already covers the same scenario and only the expected behavior/value changed, reuse that existing C-ID and add it to needs_review.
+- Do not create a new test merely because a percentage, threshold, label, calculation result, or other expected value changed.
+- Example: if an existing case verifies a 5% discount and the release changes that behavior to 10%, reuse the existing case and mark it TBD for update. Do not create a separate 10% version of the same scenario.
+
+Before proposing each new test, ask:
+
+"Is this genuinely a new scenario, or is it an existing scenario whose expected result changed?"
+
+If it is an existing scenario with changed expected behavior:
+- do NOT add it to new_test_cases
+- reuse the existing case
+- add that case to needs_review
+
+NEW TEST CASE DUPLICATE CHECK
+
+Before adding anything to new_test_cases:
+
+1. Find the closest existing test case in the supplied reference regression plan.
+
+2. Decide whether the proposed coverage is:
+   - a genuinely new scenario, path, interaction, or behavior
+   OR
+   - an existing scenario whose expected behavior has changed.
+
+3. If the existing case can be updated to cover the changed behavior:
+   - do NOT create a new test case
+   - select the existing C-ID
+   - add that C-ID to needs_review
+
+4. For every item that remains in new_test_cases:
+   - closest_existing_case_id must contain the closest existing C-ID when a meaningful related case exists
+   - use null only when no meaningful existing case exists
+   - why_not_reuse_existing must clearly explain why updating/reusing the closest case is insufficient
+
+5. A different percentage, amount, threshold, label, expected result, or calculation value by itself is NOT enough to justify a new permanent regression case.
 
 RISK GUIDANCE
 
@@ -109,20 +145,29 @@ Required output format:
   ],
 
   "new_test_cases": [
-    {
-      "section": "Existing or new TestRail section name",
-      "title": "Suggested new regression test case title",
-      "reason": "Why this test is needed for the new or uncovered behavior",
-      "preconditions": [
-        "Precondition"
-      ],
-      "steps": [
-        "Step 1",
-        "Step 2"
-      ],
-      "expected_result": "Expected result",
-      "priority": "Critical|High|Medium|Low",
-      "test_type": "Functional|API|Validation|Security|Integration"
-    }
+  {
+    "section": "Existing or new TestRail section name",
+    "title": "Suggested new regression test case title",
+    "reason": "Why this test is needed for the new or uncovered behavior",
+
+    "closest_existing_case_id": null,
+
+    "why_not_reuse_existing": "Explain why the closest existing reference case cannot be reused or updated to cover this scenario.",
+
+    "preconditions": [
+      "Precondition"
+    ],
+
+    "steps": [
+      "Step 1",
+      "Step 2"
+    ],
+
+    "expected_result": "Expected result",
+
+    "priority": "Critical|High|Medium|Low",
+
+    "test_type": "Functional|API|Validation|Security|Integration"
+  }
   ]
 }
