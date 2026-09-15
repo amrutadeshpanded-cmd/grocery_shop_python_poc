@@ -219,7 +219,13 @@ def remove_from_cart(id):
         #Query the cart items from the database based on cart_id & user_id
         #cart_id is extracted from url as "id" parameter
         #cart_id & user_id are used to uniquely identify the cart item for deletion
-        Cart.query.filter_by(user_id=session["user_id"], cart_id=id).delete()
+        cart_item = Cart.query.filter_by(
+            user_id=session["user_id"],
+            cart_id=id
+        ).first()
+
+        if cart_item and cart_item.product_qty > 1:
+            cart_item.product_qty -= 1
         #Flush changes to database session
         db.session.flush()
         #Commit changes to database
