@@ -566,6 +566,14 @@ def create_order():
             # # Release 2: Apply 10% discount for orders of $100 or more
             discount = total * 0.10
             total = round(total - discount, 2)
+
+        # KAN-7: Apply free shipping for orders of $75 or more
+        if total >= 75:
+            shipping_cost = 0
+        else:
+            shipping_cost = 5
+
+        total = round(total + shipping_cost, 2)
         #Create a new Order record with the user's ID and the total price
         new_order = Order(user_id=session["user_id"], order_total=total)
         db.session.add(new_order)
