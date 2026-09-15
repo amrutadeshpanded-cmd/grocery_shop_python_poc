@@ -41,6 +41,12 @@ If important coverage is missing from the Master, suggest it separately
 under proposed_new_cases.
 
 Proposed new cases must not be treated as existing TestRail cases.
+For every proposed new case, choose suggested_section from the
+section names that already exist in the provided TestRail Master.
+
+Do not invent a new section name.
+The suggested_section must exactly match an existing TestRail
+Master section.
 
 Return JSON only in this structure:
 
@@ -56,12 +62,12 @@ Return JSON only in this structure:
         }}
     ],
     "proposed_new_cases": [
-        {{
-            "section": "Section name",
-            "title": "Proposed test title",
-            "reason": "Why additional coverage is needed"
-        }}
-    ]
+    {{
+        "suggested_section": "Existing TestRail section name",
+        "title": "Proposed test title",
+        "reason": "Why additional coverage is needed"
+    }}
+]
 }}
 
 Allowed impact_type values:
@@ -121,8 +127,14 @@ def validate_selected_cases(
     valid_case_ids = {
         case["case_id"]
         for case in master_cases
+       
     }
 
+    valid_sections = {
+        case["section"]
+        for case in master_cases
+        if case.get("section")
+    }
     valid_selected_cases = []
     invalid_selected_cases = []
 
@@ -143,6 +155,20 @@ def validate_selected_cases(
                 selected_case
             )
 
+        valid_proposed_cases = []
+
+    for proposed_case in ai_result.get(
+        "proposed_new_cases",
+        []
+    ):
+        suggested_section = proposed_case.get(
+            "suggested_section"
+        )
+
+        if suggested_section in valid_sections:
+            valid_proposed_cases.append(
+                proposed_case
+            )
     return {
         "release_summary": ai_result.get(
             "release_summary",
@@ -150,8 +176,5 @@ def validate_selected_cases(
         ),
         "selected_cases": valid_selected_cases,
         "invalid_selected_cases": invalid_selected_cases,
-        "proposed_new_cases": ai_result.get(
-            "proposed_new_cases",
-            []
-        )
+        "proposed_new_cases": valid_proposed_cases
     }

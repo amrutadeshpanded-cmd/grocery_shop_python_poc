@@ -1,92 +1,158 @@
-import subprocess
+import requests
+from urllib.parse import urlparse
 
+def parse_github_repository_url(
+    repository_url
+):
+    """
+    Extract GitHub owner and repository name
+    from a GitHub repository URL.
+    """
 
-def run_git_command(repo_path, *args):
-    result = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo_path),
-            *args
-        ],
-        capture_output=True,
-        text=True,
-        check=True
+    parsed_url = urlparse(
+        repository_url
     )
 
-    return result.stdout.strip()
+    if parsed_url.netloc != "github.com":
+        raise ValueError(
+            "Only GitHub repository URLs are supported."
+        )
 
+    path_parts = [
+        part
+        for part in parsed_url.path.split("/")
+        if part
+    ]
 
-def get_release_git_context(
-    repo_path,
+    if len(path_parts) < 2:
+        raise ValueError(
+            "Invalid GitHub repository URL."
+        )
+
+    owner = path_parts[0]
+
+    repo = path_parts[1].removesuffix(
+        ".git"
+    )
+
+    return owner, repo
+
+def get_github_compare(
+    repository_url,
     base_ref,
     target_ref
 ):
-    commits_text = run_git_command(
-        repo_path,
-        "log",
-        "--pretty=format:%H|%s",
-        f"{base_ref}..{target_ref}"
+    """
+    Compare two GitHub refs and return
+    changed files with their patches.
+    """
+
+    owner, repo = parse_github_repository_url(
+        repository_url
     )
 
-    changed_files_text = run_git_command(
-        repo_path,
-        "diff",
-        "--name-only",
-        base_ref,
-        target_ref
+    url = (
+        f"https://api.github.com/repos/"
+        f"{owner}/{repo}/compare/"
+        f"{base_ref}...{target_ref}"
     )
 
-    diff_text = run_git_command(
-        repo_path,
-        "diff",
-        base_ref,
-        target_ref
+    response = requests.get(
+        url,
+        timeout=30
     )
 
-    commits = []
+    response.raise_for_status()
 
-    if commits_text:
-        for line in commits_text.splitlines():
-            commit_hash, message = line.split(
-                "|",
-                1
+    return response.json()
+
+def get_github_release_context(
+    repository_url,
+    base_ref,
+    target_ref
+):
+    compare_data = get_github_compare(
+        repository_url=repository_url,
+        base_ref=base_ref,
+        target_ref=target_ref
+    )
+
+    changed_files = []
+    diff_parts = []
+
+    for file in compare_data.get(
+        "files",
+        []
+    ):
+        filename = file.get(
+            "filename"
+        )
+
+        changed_files.append(
+            filename
+        )
+
+        patch = file.get(
+            "patch",
+            ""
+        )
+
+        if patch:
+            diff_parts.append(
+                f"File: {filename}\n{patch}"
             )
-
-            commits.append({
-                "hash": commit_hash,
-                "message": message
-            })
-
-    changed_files = (
-        changed_files_text.splitlines()
-        if changed_files_text
-        else []
-    )
 
     return {
         "base_ref": base_ref,
         "target_ref": target_ref,
-        "commit_count": len(commits),
-        "commits": commits,
+        "commit_count": compare_data.get(
+            "total_commits",
+            0
+        ),
         "changed_files": changed_files,
-        "diff": diff_text
+        "diff": "\n\n".join(
+            diff_parts
+        )
     }
 
-def get_files_diff(
-    repo_path,
+
+def get_github_files_diff(
+    repository_url,
     base_ref,
     target_ref,
     files
 ):
-    if not files:
-        return ""
+    compare_data = get_github_compare(
+        repository_url=repository_url,
+        base_ref=base_ref,
+        target_ref=target_ref
+    )
 
-    return run_git_command(
-        repo_path,
-        "diff",
-        base_ref,
-        target_ref,
-        "--",
-        *files
+    selected_files = set(files)
+
+    diff_parts = []
+
+    for file in compare_data.get(
+        "files",
+        []
+    ):
+        filename = file.get(
+            "filename"
+        )
+
+        if filename not in selected_files:
+            continue
+
+        patch = file.get(
+            "patch",
+            ""
+        )
+
+        if patch:
+            diff_parts.append(
+                f"File: {filename}\n{patch}"
+            )
+
+    return "\n\n".join(
+        diff_parts
     )

@@ -152,7 +152,8 @@ def load_master_cases():
 
 def create_test_run(
     run_name,
-    case_ids
+    case_ids,
+    description=""
 ):
     testrail_url = os.getenv(
         "TESTRAIL_URL"
@@ -191,11 +192,12 @@ def create_test_run(
     )
 
     payload = {
-        "suite_id": int(suite_id),
-        "name": run_name,
-        "include_all": False,
-        "case_ids": case_ids
-    }
+    "suite_id": int(suite_id),
+    "name": run_name,
+    "description": description,
+    "include_all": False,
+    "case_ids": case_ids
+}
 
     response = requests.post(
         url,
@@ -212,6 +214,61 @@ def create_test_run(
     if response.status_code != 200:
         raise RuntimeError(
             f"TestRail run creation failed. "
+            f"Status: {response.status_code}\n"
+            f"{response.text}"
+        )
+
+    return response.json()
+
+def create_test_case(
+    section_id,
+    title
+):
+    testrail_url = os.getenv(
+        "TESTRAIL_URL"
+    )
+
+    testrail_email = os.getenv(
+        "TESTRAIL_EMAIL"
+    )
+
+    testrail_api_key = os.getenv(
+        "TESTRAIL_API_KEY"
+    )
+
+    if not all([
+        testrail_url,
+        testrail_email,
+        testrail_api_key
+    ]):
+        raise RuntimeError(
+            "TestRail environment variables are missing."
+        )
+
+    url = (
+        f"{testrail_url}/index.php?"
+        f"/api/v2/add_case/{section_id}"
+    )
+
+    payload = {
+        "title": title
+    }
+
+    response = requests.post(
+        url,
+        json=payload,
+        auth=HTTPBasicAuth(
+            testrail_email,
+            testrail_api_key
+        ),
+        headers={
+            "Content-Type": "application/json"
+        }
+    )
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"TestRail case creation failed. "
             f"Status: {response.status_code}\n"
             f"{response.text}"
         )
