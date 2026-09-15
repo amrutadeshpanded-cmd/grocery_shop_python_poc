@@ -203,6 +203,8 @@ def cart():
         for item in cart_list:
             #Query the product details based on product_id stored in the cart
             pro = Product.query.filter_by(id=item.product_id).first()
+
+            
             #Append product details to the pro_list
             pro_list.append((pro.name, item.product_qty, pro.price_per_unit, pro.category, pro.image, pro.brand, int(pro.price_per_unit)*int(item.product_qty), item.cart_id ))
             print(pro.name, item.product_qty, pro.price_per_unit, pro.category, pro.image, pro.brand)
@@ -251,6 +253,12 @@ def add_to_cart(id):
     if "user_id" in session:
         #Query the product with the given "id" from the database
         prod=Product.query.filter_by(id=id).first()
+
+        # KAN-9: Prevent out-of-stock products from being added to cart
+        if prod and int(prod.qty) <= 0:
+            flash("PRODUCT IS OUT OF STOCK")
+            return redirect(f"/product/{prod.category}")
+
         #Query the user cart to check if the product is already in cart based on its "id"
         cart = Cart.query.filter_by(user_id=session["user_id"], product_id=id).first()
         #Get qty of the product to be added to cart from submitted form
