@@ -64,6 +64,12 @@ def login():
         #Get value of "email" & "password" from the form submitted by user
         cemail = request.form.get("email")
         cpassword = request.form.get("password")
+
+        # KAN-8: Validate required login credentials
+        if not cemail or not cpassword:
+            flash("EMAIL AND PASSWORD ARE REQUIRED")
+            return redirect("/sign-in")
+
         #Query the database to check if a user with the provided email & password exists
         user = User.query.filter_by(email=cemail, password=cpassword)
         #Convert the result of the query into list
